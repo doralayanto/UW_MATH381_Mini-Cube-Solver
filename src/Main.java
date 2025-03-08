@@ -68,7 +68,7 @@ public class Main {
                 if (!cubeSpace.containsKey(new Cube(input))) {
                     System.out.println("Input invalid.");
                 } else {
-                    System.out.println("Directions: " + solveCube(input, cubeSpace));
+                    System.out.println("Directions: " + solveCubeTwoSource(input, cubeSpace));
                 }
                 System.out.println();
             }
@@ -84,8 +84,11 @@ public class Main {
             randomCubes.add(allCubes.stream().skip(random.nextInt(allCubes.size())).findFirst().orElse(null));
         }
 
-        List<Double> times = new ArrayList<>();
-        List<Integer> moves = new ArrayList<>();
+        List<Double> times1 = new ArrayList<>();
+        List<Integer> moves1 = new ArrayList<>();
+
+        List<Double> times2 = new ArrayList<>();
+        List<Integer> moves2 = new ArrayList<>();
 
         for (int i=0; i < randomCubes.size(); i++) {
             if ((i+1) % 5 == 0) {
@@ -94,27 +97,40 @@ public class Main {
             String cube = randomCubes.get(i).toString();
             String solution;
             long start = System.nanoTime();
-            solution = solveCube(cube, cubeSpace);
+            solution = solveCubeOneSource(cube, cubeSpace);
             long end = System.nanoTime();
             double duration = (end - start) / 1_000_000_000.0; DecimalFormat df = new DecimalFormat("#.###");
             double solveTime = Double.parseDouble(df.format(duration));
-            times.add(solveTime);
+            times1.add(solveTime);
             solution = solution.replaceAll("[\\[\\]]", "").trim();
             int count = solution.isEmpty() ? 0 : solution.split(", ").length;
-            moves.add(count);
+            moves1.add(count);
+
+            start = System.nanoTime();
+            solution = solveCubeTwoSource(cube, cubeSpace);
+            end = System.nanoTime();
+            duration = (end - start) / 1_000_000_000.0;
+            solveTime = Double.parseDouble(df.format(duration));
+            times2.add(solveTime);
+            solution = solution.replaceAll("[\\[\\]]", "").trim();
+            count = solution.isEmpty() ? 0 : solution.split(", ").length;
+            moves2.add(count);
         }
-        saveTestsInCsv(randomCubes, times, moves);
+        saveTestsInCsv(randomCubes, times1, times2, moves1, moves2);
 
     }
 
-    public static void saveTestsInCsv(List<Cube> randomCubes, List<Double> times, List<Integer> moves) {
+    public static void saveTestsInCsv(List<Cube> randomCubes, List<Double> times1, List<Double> times2, List<Integer>
+            moves1, List<Integer> moves2) {
         String filePath = "solveStats_" + randomCubes.size() + "Cubes.csv";
         try (FileWriter writer = new FileWriter(filePath)) {
-            writer.append("cube,solveTime,numMoves\n");
+            writer.append("cube,solveTime1,numMoves1,solveTime2,numMoves2\n");
             for (int i = 0; i < randomCubes.size(); i++) {
                 writer.append(randomCubes.get(i).toString()).append(",");
-                writer.append(times.get(i).toString()).append(",");
-                writer.append(moves.get(i).toString()).append("\n");
+                writer.append(times1.get(i).toString()).append(",");
+                writer.append(moves1.get(i).toString()).append(",");
+                writer.append(times2.get(i).toString()).append(",");
+                writer.append(moves2.get(i).toString()).append("\n");
             }
             System.out.println("Solve stats saved in: " + filePath);
         } catch (IOException e) {
@@ -122,14 +138,78 @@ public class Main {
         }
     }
 
-    public static String solveCube(String string, Map<Cube, Map<Cube, Character>> cubeSpace) {
+    public static String solveCubeTwoSource(String string, Map<Cube, Map<Cube, Character>> cubeSpace) {
+        Cube origin = new Cube(string); // creating the unsolved input cube
+        Cube target = new Cube("WWWWRRRRBBBBOOOOGGGGYYYY"); // defining the destination of our search
+        Queue<Cube> queue1 = new ArrayDeque<>();     // BFS queue
+        Set<Cube> visited1 = new HashSet<>();        // keeps track of nodes we have already visited (and thus already
+                                                    // have a shortest path for)
+        Map<Cube, Cube> parent1 = new HashMap<>();   // Key = cube (A); Value = cube (B); (B)--> (A) when traveling from
+                                                    // input --> solved
+
+        Queue<Cube> queue2 = new ArrayDeque<>();     // BFS queue
+        Set<Cube> visited2 = new HashSet<>();        // keeps track of nodes we have already visited (and thus already
+        // have a shortest path for)
+        Map<Cube, Cube> parent2 = new HashMap<>();   // Key = cube (A); Value = cube (B); (B)--> (A) when traveling from
+        // input --> solved
+
+        queue1.add(target);
+        visited1.add(target);
+        parent1.put(target, null);
+        List<String> path1 = new ArrayList<>();
+
+        queue2.add(origin);
+        visited2.add(origin);
+        parent2.put(origin, null);
+        List<String> path2 = new ArrayList<>();
+
+        while (!queue1.isEmpty() && !queue2.isEmpty()) {
+            if (!queue1.isEmpty()) {
+                Cube cube = queue1.remove();
+                if (visited2.contains(cube)) {
+                    path1 = reconstructPath(parent1, cube); // check parameter value, should it be origin, target, or cube
+                    path2 = reconstructPath(parent2, cube);
+                    Collections.reverse(path2);
+                    break;
+                }
+                for (Cube neighbor : cubeSpace.get(cube).keySet()) {
+                    if (!visited1.contains(neighbor)) {
+                        visited1.add(neighbor); parent1.put(neighbor, cube); queue1.add(neighbor);
+                    }
+                }
+            }
+
+            if (!queue2.isEmpty()) {
+                Cube cube = queue2.remove();
+                if (visited1.contains(cube)) {
+                    path1 = reconstructPath(parent1, cube);
+                    path2 = reconstructPath(parent2, cube); // check parameter value, should it be origin, target, or cube
+                    Collections.reverse(path2);
+                    break;
+                }
+                for (Cube neighbor : cubeSpace.get(cube).keySet()) {
+                    if (!visited2.contains(neighbor)) {
+                        visited2.add(neighbor); parent2.put(neighbor, cube); queue2.add(neighbor);
+                    }
+                }
+            }
+
+        }
+        path2.removeLast();
+        path2.addAll(path1);
+        List<String> directions = getDirections(path2, cubeSpace);   // retrieves the moves needed to traverse the
+                                                                    // given sequence of states
+        return "" + directions;
+    }
+
+    public static String solveCubeOneSource(String string, Map<Cube, Map<Cube, Character>> cubeSpace) {
         Cube origin = new Cube(string); // creating the unsolved input cube
         Cube target = new Cube("WWWWRRRRBBBBOOOOGGGGYYYY"); // defining the destination of our search
         Queue<Cube> queue = new ArrayDeque<>();     // BFS queue
         Set<Cube> visited = new HashSet<>();        // keeps track of nodes we have already visited (and thus already
-                                                    // have a shortest path for)
+        // have a shortest path for)
         Map<Cube, Cube> parent = new HashMap<>();   // Key = cube (A); Value = cube (B); (B)--> (A) when traveling from
-                                                    // input --> solved
+        // input --> solved
         queue.add(target);
         visited.add(target);
         parent.put(target, null);
@@ -137,19 +217,19 @@ public class Main {
         while (!queue.isEmpty()) {
             Cube cube = queue.remove();
             if (cube.equals(origin)) {  // as soon as we encounter the solved state, we stop the BFS and construct the
-                                        // sequence of states we traversed from input to solved.
+                // sequence of states we traversed from input to solved.
                 path = reconstructPath(parent, origin);
                 break;
             }
             for (Cube neighbor : cubeSpace.get(cube).keySet()) { // if we haven't encountered the solved state yet, then
-                                                                // we keep exploring, storing the predecessor of each state
+                // we keep exploring, storing the predecessor of each state
                 if (!visited.contains(neighbor)) {
                     visited.add(neighbor); parent.put(neighbor, cube); queue.add(neighbor);
                 }
             }
         }
         List<String> directions = getDirections(path, cubeSpace);   // retrieves the moves needed to traverse the
-                                                                    // given sequence of states
+        // given sequence of states
         return "" + directions;
     }
 
